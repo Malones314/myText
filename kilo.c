@@ -1,6 +1,8 @@
 #include<unistd.h>
 #include<termios.h>
 #include<stdlib.h>
+#include<ctype.h>
+#include<stdio.h>
 
 struct termios orig_termios;
 
@@ -13,7 +15,7 @@ void disableRawMode(){    //得到terminal的副本，配合atexit()函数在程
 //2.手动修改结构
 //3.将修改后的结构传递给tcsetattr()以写入新的terminal属性
 void enableRawMode() {				       
-  tcgetattr( STDIN_FILEND, &orig_termios);
+  tcgetattr( STDIN_FILENO, &orig_termios);
   atexit( disableRawMode);  //atexit 是线程安全的：从多个线程调用该函数不会引发数据竞争。
                             //用它来注册 disableRawMode() 函数，以便在程序退出时自动调用
   struct termios raw = orig_termios;	        
@@ -27,8 +29,15 @@ void enableRawMode() {
 int main(){
   enableRawMode();
   char c;
-  while( read( STDIN_FILENO, &c, 1) == 1 && c != 'q' );  
-	 //read()、 STDIN_FILENO都来自 <unistd.h>, 使用read()从标准输入中得到1byte直到没有更多输入  
+  
+  //read()、 STDIN_FILENO都来自 <unistd.h>, 使用read()从标准输入中得到1byte直到没有更多输入  
+  while( read( STDIN_FILENO, &c, 1) == 1 && c != 'q' ){
+    if( iscntrl(c)){  //iscntrl(c)检查c是否为c语言中的控制字符
+      printf( "%d\n", c);
+    }else{
+      printf( "%d('%c')\n", c, c);
+    }
+  }
 
   return 0;
 }
