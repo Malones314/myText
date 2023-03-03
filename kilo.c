@@ -5,7 +5,7 @@
 struct termios orig_termios;
 
 void disableRawMode(){    //得到terminal的副本，配合atexit()函数在程序结束时还原terminal
-  tcgetattr( STDIN_FILENO, TCSAFLUSH, &orig_termios);
+  tcsetattr( STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
 //可以通过以下方式设置terminal的属性：
@@ -17,8 +17,6 @@ void enableRawMode() {
   atexit( disableRawMode);  //atexit 是线程安全的：从多个线程调用该函数不会引发数据竞争。
                             //用它来注册 disableRawMode() 函数，以便在程序退出时自动调用
   struct termios raw = orig_termios;	        
-  tcgetattr( STDIN_FILENO, &raw);	 
-
   raw.c_lflag &= ~(ECHO | ICANON);			//关闭ECHO、ICANON,c_lflag：本地模式
                                         //ICANON：标准模式，关闭后逐字节读取，而非逐行读取
   tcsetattr( STDIN_FILENO, TCSAFLUSH, &raw);
