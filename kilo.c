@@ -1,11 +1,26 @@
+/*** includes ***/
+
 #include<unistd.h>
 #include<termios.h>
 #include<stdlib.h>
 #include<ctype.h>
 #include<stdio.h>
+#include<errno.h>
+
+/*** defines ***/
+
+//CTRL加字母映射到字母对应的位数, 定义一个推到是否按下了CTRL和字母键的组合
+#define WITH_CTRL(n) ( (n) & 0x1f )   //取ACSII码后5位
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*** data ***/
 
 struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*** terminal ***/
 //错误信息打印，当函数错误时手动调用
 void error_information( const char* s){ //s:指向带有解释性消息的空终止字符串的指针
   //perror将当前存储在系统变量 errno 中的错误代码的文本描述打印到 stderr。
@@ -70,22 +85,48 @@ void enable_raw_mode() {
     //所有已接受但未读入的输入都在改变发生前丢弃，即终端不显示输入的字符
 }
 
-int main(){
-  enable_raw_mode();
-  while(1){
-    char c = '\0';
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    //read()、 STDIN_FILENO都来自 <unistd.h>, 使用read()从标准输入中得到1byte直到没有更多输入  
-    if( read( STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) 
-      error_information( "read");
+/*** input system ***/
+
+//从键盘读取字符
+char get_read_from_keyboard() {
+  int read_errno = 0;
+  char c;
+
+  //read()、 STDIN_FILENO都来自 <unistd.h>, 使用read()从标准输入中得到1byte直到没有更多输入  
+  while( (read_errno = read( STDIN_FILENO, &c, 1)) != 1){
+    if( read_errno == -1 && errno != EAGAIN)
+      error_information("read");
+  }
+
+  return c;
+}
+
+//input system
+void input_system(){
+  char c = get_read_from_keyboard();
+  /* 测试
     if( iscntrl(c)){  //iscntrl(c)检查c是否为c语言中的控制字符
-      printf( "%d\r\n", c);   //c为控制字符，打印c的ASCII码
+        printf( "%d\r\n", c);   //c为控制字符，打印c的ASCII码
     }else{
       printf( "%d('%c')\r\n", c, c);  //打印c的ASCII码，并输出c
     }
-    if( c == 'q')
-      break;
-    
+  */
+  if( c == WITH_CTRL('q') ){ //当按下Ctrl-q/Q 时退出
+    exit(0);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*** init system ***/
+int main(){
+  enable_raw_mode();
+  while(1){
+    input_system();
   }
   return 0;
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
