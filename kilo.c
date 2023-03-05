@@ -7,9 +7,13 @@
 #include<stdio.h>
 #include<errno.h>
 #include<sys/ioctl.h>
+#include<string.h>
 
-/*** function defines ***/
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/*** function&struct defines ***/
+struct String_buff;
+struct Text_config;
 void clear_screen();  //清除屏幕
 void output_draw_rows();  //在每一行开头绘制-
 void output_system(); //屏幕打印
@@ -27,6 +31,8 @@ int get_cursor_position( int* rows, int* cols);  //获得光标位置
 
 //CTRL加字母映射到字母对应的位数, 定义一个推到是否按下了CTRL和字母键的组合
 #define WITH_CTRL(n) ( (n) & 0x1f )   //取ACSII码后5位
+
+#define KILO_VERSION "0.0.1"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -50,15 +56,44 @@ void clear_screen(){
 }
 
 //在每一行的开头绘制-
-void output_draw_rows(){
+void output_draw_rows( struct String_buff* strb ){
   int row_ = -1;
   for( row_ = 0; row_ < text.screen_rows; ++row_){ 
-    write( STDOUT_FILENO, "-\r\n", 3);
+
+    if( row_ == text.screen_rows / 3){  //在屏幕三分之一处显示欢迎信息
+      char welcome[100];
+      int welcome_len = snprintf( welcome, sizeof( welcome_len),
+        "myText--Kilo -- version %s", KILO_VERSION);
+      if( welcome_len > text.screen_cols)
+        welcome_len = text.screen_cols;
+      int in_half = (text.screen_cols - welcome_len) / 2;
+      if( in_half){
+        string_buff_append( strb, "-", 1);
+        in_half--;
+      }
+      while( in_half--)
+        string_buff_append( strb, " ", 1);
+      string_buff_append( str, welcome, welcome_len);
+    } else {
+      string_buff_append( strb, "-", 1);
+    }
+
+    string_buff_append( strb, "\x1b[K", 3);
+    //k:擦除当前行的一部分, 默认参数为0
+      //2:擦除整行
+      //1:擦除光标左侧的部分行
+      //0:擦除光标右侧的部分行
+    if( row_ < text.screen_rows - 1)
+      string_buff_append( strb, "\r\n", 2);
   }
 }
 
+//刷新屏幕
+
 //屏幕打印
 void output_system(){
+  //第一版 刷新屏幕
+/*
   write( STDOUT_FILENO, "\x1b[2J", 4);
     //ssize_t write(int fildes, const void *buf, size_t nbyte);
       //filds:要写入的打开文件的文件描述符
@@ -86,6 +121,26 @@ void output_system(){
   output_draw_rows();
 
   write( STDOUT_FILENO, "\x1b[H", 3);
+*/
+
+  //第二版 通过string_buff刷新屏幕
+  struct String_buff strb;
+  string_buff_init( &strb);
+
+  string_buff_append( &strb, "\x1b[?25l", 6);
+  //l:Reset Mode,用于重置各种终端功能或模式
+
+  string_buff_append( &strb, "\x1b[H", 3);
+  
+  output_draw_rows( &strb);
+  
+  string_buff_append( &strb, "\x1b[H", 3);
+  string_buff_append( &strb, "\x1b[?25h", 6);
+  //h:Set Mode,用于打开各种终端功能或模式
+
+  write( STDOUT_FILENO, strb.b, strb.len);
+  
+  string_buff_free( &strb);
 
 }
 
@@ -177,11 +232,12 @@ int get_cursor_position( int* rows, int* cols){
   }
   buf[ui] = '\0'; //设置结尾字符为'\0'
 
-  printf( "\r\n&buf[1] : '%s'\r\n", &buf[1]); //buf[0]为'\x1b'，故传递buf[1]
+  if( buf[0] != '\x1b' || buf[1] != '[' ) //保证转义字符\x1b响应
+    return -1;
+  if( sscanf( &buf[2], "%d;%d", rows, cols) != 2)
+    return -1;
   
-  get_read_from_keyboard();
-  
-  return -1;
+  return 0;
 }
 
 //得到窗口大小
@@ -212,6 +268,43 @@ int get_window_size( int* rows, int* cols){
     *rows = ws.ws_row;
     return 0;
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*** string buff ***/
+//因为C没有动态字符串，设置一种字符串，可以在原字符串上追加字符
+struct String_buff {
+  char* b;
+  int len;
+};
+
+// String buff初始化函数 ctor
+void string_buff_init( struct String_buff* strb){
+  strb->b = NULL;
+  strb->len = 0;
+}
+
+//在strb指向字符串后面追加字符串s
+void string_buff_append( struct String_buff* strb, const char* s, int len_ ){
+  char* new  = realloc( strb->b, strb->len+len_);
+  //void *realloc(void *ptr, size_t size);
+    //改变内存块的大小
+  if( new == NULL)
+    return ;
+
+  memcpy( &new[ strb->len], s, len_);
+  //void *memcpy(void *s1, const void *s2, size_t n);
+    //s1: 目标缓冲区地址
+    //s2: 源缓冲区地址
+    //n:  复制字节个数
+  strb->b = new;
+  strb->len += len_;
+}
+
+//释放strb空间 dtor
+void string_buff_free( struct String_buff* strb){
+  free( strb->b);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
