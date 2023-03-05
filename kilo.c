@@ -8,6 +8,21 @@
 #include<errno.h>
 #include<sys/ioctl.h>
 
+/*** function defines ***/
+
+void clear_screen();  //清除屏幕
+void output_draw_rows();  //在每一行开头绘制-
+void output_system(); //屏幕打印
+void error_information( const char* s); //错误信息打印，当函数错误时手动调用
+void disable_raw_mode();  //得到terminal的副本，配合atexit()函数在程序结束时还原terminal
+void enable_raw_mode(); //设置终端属性
+int get_window_size( int* rows, int* cols); //得到窗口大小
+char get_read_from_keyboard();  //从键盘读取字符
+void input_system();  //input system
+void init_text(); //初始化myText
+void get_cursor_position( int* rows, int* cols);  //获得光标位置
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 /*** defines ***/
 
 //CTRL加字母映射到字母对应的位数, 定义一个推到是否按下了CTRL和字母键的组合
@@ -18,8 +33,8 @@
 /*** data ***/
 
 struct Text_config{
-  int screen_rows = -1;
-  int screen_cols = -1;
+  int screen_rows;
+  int screen_cols;
   struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
 };
 
@@ -42,6 +57,7 @@ void output_draw_rows(){
   }
 }
 
+//屏幕打印
 void output_system(){
   write( STDOUT_FILENO, "\x1b[2J", 4);
     //ssize_t write(int fildes, const void *buf, size_t nbyte);
@@ -142,6 +158,29 @@ void enable_raw_mode() {
     //所有已接受但未读入的输入都在改变发生前丢弃，即终端不显示输入的字符
 }
 
+//得到坐标位置
+int get_cursor_position( int* rows, int* cols){
+
+  //设置输入缓冲区
+  char buf[32];
+  unsigned int ui = 0;
+
+  if ( write( STDOUT_FILENO, "\x1b[6n", 4) != 4)
+    return -1;
+    //n命令用于查询终端的状态信息
+  pritnf("\n");
+  char c ;
+  while( read( STDIN_FILENO, &c, 1) == 1 ){
+    if( iscntrl(c)){  //c为控制字符
+      printf( "%d\r\n", c);
+    } else {
+      printf( "%c\r\n", c);
+    }
+  }
+  get_read_from_keyboard();
+  return -1;
+}
+
 //得到窗口大小
 int get_window_size( int* rows, int* cols){
   
@@ -159,7 +198,12 @@ int get_window_size( int* rows, int* cols){
       //ENOTTY: fildes 与接受控制功能的设备驱动程序无关。
       //ENXIO: 请求和 arg 参数对此设备驱动程序有效，但请求的服务无法在此特定子设备上执行。
   if( ioctl( STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0 ){
-    return -1;
+    if( write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12 )
+      return -1;
+      //C：光标移到右边
+      //B：光标移到下面
+      //通过C、B，让光标移到右下角，C、B命令赚蒙用于阻止光标越过屏幕
+    return get_cursor_position( rows, cols);
   } else {
     *cols = ws.ws_col;
     *rows = ws.ws_row;
