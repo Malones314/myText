@@ -20,7 +20,7 @@ int get_window_size( int* rows, int* cols); //得到窗口大小
 char get_read_from_keyboard();  //从键盘读取字符
 void input_system();  //input system
 void init_text(); //初始化myText
-void get_cursor_position( int* rows, int* cols);  //获得光标位置
+int get_cursor_position( int* rows, int* cols);  //获得光标位置
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*** defines ***/
@@ -168,16 +168,19 @@ int get_cursor_position( int* rows, int* cols){
   if ( write( STDOUT_FILENO, "\x1b[6n", 4) != 4)
     return -1;
     //n命令用于查询终端的状态信息
-  pritnf("\n");
-  char c ;
-  while( read( STDIN_FILENO, &c, 1) == 1 ){
-    if( iscntrl(c)){  //c为控制字符
-      printf( "%d\r\n", c);
-    } else {
-      printf( "%c\r\n", c);
-    }
+  while( ui < sizeof( buf) - 1) {
+    if( read( STDIN_FILENO, &buf[ui], 1) != 1 )
+      break;
+    if( buf[i] == 'R')  //到达R退出
+      break;
+    ui++;
   }
+  buf[ui] = '\0'; //设置结尾字符为'\0'
+
+  printf( "\r\n&buf[1] : '%s'\r\n", &buf[1]); //buf[0]为'\x1b'，故传递buf[1]
+  
   get_read_from_keyboard();
+  
   return -1;
 }
 
