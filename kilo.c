@@ -36,6 +36,44 @@ int get_cursor_position( int* rows, int* cols);  //获得光标位置
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/*** string buff ***/
+//因为C没有动态字符串，设置一种字符串，可以在原字符串上追加字符
+struct String_buff {
+  char* b;
+  int len;
+};
+
+// String buff初始化函数 ctor
+void string_buff_init( struct String_buff* strb){
+  strb->b = NULL;
+  strb->len = 0;
+}
+
+//在strb指向字符串后面追加字符串s
+void string_buff_append( struct String_buff* strb, const char* s, int len_ ){
+  char* new  = realloc( strb->b, strb->len+len_);
+  //void *realloc(void *ptr, size_t size);
+    //改变内存块的大小
+  if( new == NULL)
+    return ;
+
+  memcpy( &new[ strb->len], s, len_);
+  //void *memcpy(void *s1, const void *s2, size_t n);
+    //s1: 目标缓冲区地址
+    //s2: 源缓冲区地址
+    //n:  复制字节个数
+  strb->b = new;
+  strb->len += len_;
+}
+
+//释放strb空间 dtor
+void string_buff_free( struct String_buff* strb){
+  free( strb->b);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 /*** data ***/
 
 struct Text_config{
@@ -73,7 +111,7 @@ void output_draw_rows( struct String_buff* strb ){
       }
       while( in_half--)
         string_buff_append( strb, " ", 1);
-      string_buff_append( str, welcome, welcome_len);
+      string_buff_append( strb, welcome, welcome_len);
     } else {
       string_buff_append( strb, "-", 1);
     }
@@ -124,7 +162,7 @@ void output_system(){
 */
 
   //第二版 通过string_buff刷新屏幕
-  struct String_buff strb;
+  struct String_buff strb = { NULL, 0};
   string_buff_init( &strb);
 
   string_buff_append( &strb, "\x1b[?25l", 6);
@@ -226,7 +264,7 @@ int get_cursor_position( int* rows, int* cols){
   while( ui < sizeof( buf) - 1) {
     if( read( STDIN_FILENO, &buf[ui], 1) != 1 )
       break;
-    if( buf[i] == 'R')  //到达R退出
+    if( buf[ui] == 'R')  //到达R退出
       break;
     ui++;
   }
@@ -268,43 +306,6 @@ int get_window_size( int* rows, int* cols){
     *rows = ws.ws_row;
     return 0;
   }
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-/*** string buff ***/
-//因为C没有动态字符串，设置一种字符串，可以在原字符串上追加字符
-struct String_buff {
-  char* b;
-  int len;
-};
-
-// String buff初始化函数 ctor
-void string_buff_init( struct String_buff* strb){
-  strb->b = NULL;
-  strb->len = 0;
-}
-
-//在strb指向字符串后面追加字符串s
-void string_buff_append( struct String_buff* strb, const char* s, int len_ ){
-  char* new  = realloc( strb->b, strb->len+len_);
-  //void *realloc(void *ptr, size_t size);
-    //改变内存块的大小
-  if( new == NULL)
-    return ;
-
-  memcpy( &new[ strb->len], s, len_);
-  //void *memcpy(void *s1, const void *s2, size_t n);
-    //s1: 目标缓冲区地址
-    //s2: 源缓冲区地址
-    //n:  复制字节个数
-  strb->b = new;
-  strb->len += len_;
-}
-
-//释放strb空间 dtor
-void string_buff_free( struct String_buff* strb){
-  free( strb->b);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
