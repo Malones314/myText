@@ -6,18 +6,24 @@
 #include<ctype.h>
 #include<stdio.h>
 #include<errno.h>
+#include<sys/ioctl.h>
 
 /*** defines ***/
 
 //CTRL加字母映射到字母对应的位数, 定义一个推到是否按下了CTRL和字母键的组合
 #define WITH_CTRL(n) ( (n) & 0x1f )   //取ACSII码后5位
-#define TERMINAL_ROWS = 24
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*** data ***/
 
-struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
+struct Text_config{
+  int screen_rows = -1;
+  int screen_cols = -1;
+  struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
+};
+
+struct Text_config text;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -28,9 +34,10 @@ void clear_screen(){
   write(STDOUT_FILENO, "\x1b[H", 3);  //重定位光标
 }
 
+//在每一行的开头绘制-
 void output_draw_rows(){
   int row_ = -1;
-  for( row_ = 0; row_ < TERMINAL_ROWS; ++row_){
+  for( row_ = 0; row_ < text.screen_rows; ++row_){ 
     write( STDOUT_FILENO, "-\r\n", 3);
   }
 }
@@ -83,7 +90,7 @@ void error_information( const char* s){ //s:指向带有解释性消息的空终
 
 //得到terminal的副本，配合atexit()函数在程序结束时还原terminal
 void disable_raw_mode(){    
-  if( tcsetattr( STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1)
+  if( tcsetattr( STDIN_FILENO, TCSAFLUSH, &text.orig_termios) == -1)
     error_information( "tcsetattr");
     //int tcsetattr(int fildes, int optional_actions, const struct termios *termios_p); 设置终端文件描述符参数
     //TCSANOW:变化立即发生。
@@ -100,7 +107,7 @@ void disable_raw_mode(){
 void enable_raw_mode() {				
   //可以通过以下方式设置terminal的属性：
   //1.使用tcgetattr()将当前属性读入结构 2.手动修改结构  3.将修改后的结构传递给tcsetattr()以写入新的terminal属性
-  if( tcgetattr( STDIN_FILENO, &orig_termios) == -1)
+  if( tcgetattr( STDIN_FILENO, &text.orig_termios) == -1)
     error_information( "tcgetattr");
     //int tcgetattr(int fildes, struct termios *termios_p);获取终端文件描述符参数
     //未出错时返回0，出错时返回-1，并设置errno:
@@ -108,7 +115,7 @@ void enable_raw_mode() {
       //ENOTTY:与 fildes 关联的文件不是终端
   atexit( disable_raw_mode);  //atexit 是线程安全的：从多个线程调用该函数不会引发数据竞争。
                               //用它来注册 disable_raw_mode() 函数，以便在程序退出时自动调用
-  struct termios raw = orig_termios;	        
+  struct termios raw = text.orig_termios;	        
   raw.c_iflag &= ~( IXON| ICRNL| BRKINT| INPCK| ISTRIP); 
     //XON表示恢复传输，XOFF表示暂停传输
     //终端自动帮用户把Enter转换成(10,‘\n’),关闭ICRNL来关闭这个自动转换
@@ -133,6 +140,31 @@ void enable_raw_mode() {
     error_information( "tcsetattr");
     //STDIN_FILENO：stdin的文件编号，TCSAFLUSH：改变在所有写入STDIN_FILENO的输出都被传输后生效，
     //所有已接受但未读入的输入都在改变发生前丢弃，即终端不显示输入的字符
+}
+
+//得到窗口大小
+int get_window_size( int* rows, int* cols){
+  
+  struct winsize ws;  //得到窗口大小结构体
+
+  //int ioctl(int fildes, int request, ...);
+    //对设备专用文件执行各种设备特定的控制功能。
+    //...：可选的第三个参数 (arg)，用于请求特定信息。数据类型取决于特定的控制请求，但它可以是 int 或指向特定于设备的数据结构的指针。
+    //返回类型：
+      //EBADF：fildes 参数不是有效的打开文件描述符。
+      //EFAULT：请求参数需要向 arg 指向的缓冲区或从缓冲区传输数据，但此指针无效。
+      //EINTR: 一个信号打断了通话
+      //EINVAL: 请求或 arg 对此设备无效。
+      //EIO: 发生了一些物理 I/O 错误。
+      //ENOTTY: fildes 与接受控制功能的设备驱动程序无关。
+      //ENXIO: 请求和 arg 参数对此设备驱动程序有效，但请求的服务无法在此特定子设备上执行。
+  if( ioctl( STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0 ){
+    return -1;
+  } else {
+    *cols = ws.ws_col;
+    *rows = ws.ws_row;
+    return 0;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -172,9 +204,17 @@ void input_system(){
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*** init system ***/
+
+void init_text(){
+  if( get_window_size( &text.screen_rows, &text.screen_cols) == -1 )
+    error_information("get window size");
+}
+
 int main(){
   clear_screen();
   enable_raw_mode();
+  init_text();
+  
   while(1){
     output_system();
     input_system();
