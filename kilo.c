@@ -8,6 +8,7 @@
 #include<errno.h>
 #include<sys/ioctl.h>
 #include<string.h>
+#include<sys/types.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -26,6 +27,8 @@ void input_system();  //input system
 void init_text(); //初始化myText
 int get_cursor_position( int* rows, int* cols);  //获得光标位置
 void move_cursor( int key); //移动光标位置
+void text_open( char* filename); //打开文件
+void text_append_row( char* s, size_t len); //添加一行
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*** defines ***/
@@ -36,11 +39,38 @@ void move_cursor( int key); //移动光标位置
 #define KILO_VERSION "0.0.1"
 
 enum Arrow_key{
-  ARROW_LEFT = 1000;
-  ARROW_RIGHT;
-  ARROW_UP;
-  ARROW_DOWN;
+  ARROW_LEFT = 1000,
+  ARROW_RIGHT,
+  ARROW_UP,
+  ARROW_DOWN,
+  DEL_KEY,
+  HOME_KEY,
+  END_KEY,
+  PAGE_UP,
+  PAGE_DOWN
 };
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*** data ***/
+
+//存储一行文字
+typedef struct String_row {
+  int size;
+  char* one_row_string;
+} String_row;
+
+//终端信息
+struct Text_config{
+  int cursor_x, cursor_y;
+  int screen_rows;
+  int screen_cols;
+  int number_rows;
+  String_row* row;
+  struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
+};
+
+struct Text_config text;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -81,20 +111,6 @@ void string_buff_free( struct String_buff* strb){
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
-/*** data ***/
-
-struct Text_config{
-  int cursor_x, cursor_y;
-  int screen_rows;
-  int screen_cols;
-  struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
-};
-
-struct Text_config text;
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 /*** output system ***/
 
 //清除屏幕
@@ -107,25 +123,31 @@ void clear_screen(){
 void output_draw_rows( struct String_buff* strb ){
   int row_ = -1;
   for( row_ = 0; row_ < text.screen_rows; ++row_){ 
-
-    if( row_ == text.screen_rows / 3){  //在屏幕三分之一处显示欢迎信息
-      char welcome[100];
-      int welcome_len = snprintf( welcome, sizeof( welcome),
-        "myText -- Kilo -- version %s", KILO_VERSION);
-      if( welcome_len > text.screen_cols)
-        welcome_len = text.screen_cols;
-      int in_half = (text.screen_cols - welcome_len) / 2;
-      if( in_half){
+    if( row_ > text.number_rows) {
+      if( text.number_rows == 0 && row_ == text.screen_rows / 3){  
+        //当不是从文件系统打开文件时再在屏幕三分之一处显示欢迎信息，若打开文件则不显示
+        char welcome[100];
+        int welcome_len = snprintf( welcome, sizeof( welcome),
+          "myText -- Kilo -- version %s", KILO_VERSION);
+        if( welcome_len > text.screen_cols)
+          welcome_len = text.screen_cols;
+        int in_half = (text.screen_cols - welcome_len) / 2;
+        if( in_half){
+          string_buff_append( strb, "-", 1);
+          in_half--;
+        }
+        while( in_half--)
+          string_buff_append( strb, " ", 1);
+        string_buff_append( strb, welcome, welcome_len);
+      } else {
         string_buff_append( strb, "-", 1);
-        in_half--;
       }
-      while( in_half--)
-        string_buff_append( strb, " ", 1);
-      string_buff_append( strb, welcome, welcome_len);
     } else {
-      string_buff_append( strb, "-", 1);
+      int len = text.row[row_].size;
+      if( len > text.screen_cols )
+        len = text.screen_cols;
+      string_buff_append( strb, text.row[row_].one_row_string, len);
     }
-
     string_buff_append( strb, "\x1b[K", 3);
     //k:擦除当前行的一部分, 默认参数为0
       //2:擦除整行
@@ -321,19 +343,60 @@ int get_window_size( int* rows, int* cols){
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/*** row operations ***/
+
+void text_append_row( char* s, size_t len){
+  text.row = realloc( text.row, sizeof( String_row)*(text.number_rows + 1) ); //通过realloc分配内存
+  int rows_ = text.number_rows; //得到当前行号
+  text.row[rows_].size = len; 
+  text.row[rows_].one_row_string = ( char*)malloc( len + 1);
+  memcpy( text.row[rows_].one_row_string, s, len);
+  text.row[rows_].one_row_string[len] = '\0';
+  ++text.number_rows;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*** file i/o ***/
+//打开读取文件
+void text_open( char* filename){
+  FILE* fp = fopen( filename, "r");
+  if( !fp)
+    error_information("fopen");
+
+  char* line = NULL;
+  size_t linecap = 0;   
+  ssize_t linelen ; //ssize_t与size_t相同，但它是有符号类型,将 ssize_t 读作“有符号 size_t”。
+  linelen = getline( &line, &linecap, fp);
+  if( linelen != -1){
+    while( linelen > 0 && ( line[lenlen - 1] == '\n' ||
+                            line[linelen - 1] == '\r' ))
+      linelen--;
+    text_append_row( line, linelen);
+  }
+  free( line);
+  fclose( fp);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 /*** input system ***/
 
 //方向键移动光标
 void move_cursor( int key){
   
-  if( key == ARROW_UP) //上箭头 Ctrl-J
-    --text.cursor_y;
-  else if( key == ARROW_DOWN) //下箭头 Ctrl-K
-    ++text.cursor_y;
-  else if( key == ARROW_RIGHT) //右箭头 Ctrl-L
-    ++text.cursor_x;
-  else if( key == ARROW_LEFT)  //左箭头 Ctrl-H
+  if( key == ARROW_UP){ //上箭头 Ctrl-J
+    if( text.cursor_y != 0)
+      --text.cursor_y;
+  } else if( key == ARROW_DOWN){ //下箭头 Ctrl-K
+    if( text.cursor_y != text.screen_rows - 1)
+      ++text.cursor_y;
+  } else if( key == ARROW_RIGHT){ //右箭头 Ctrl-L
+    if( text.cursor_x != text.screen_cols - 1)
+      ++text.cursor_x;
+  } else if( key == ARROW_LEFT){  //左箭头 Ctrl-H
+    if( text.cursor_x != 0)
     --text.cursor_x;
+  }
 }
 
 //从键盘读取字符
@@ -346,29 +409,63 @@ int get_read_from_keyboard() {
     if( read_errno == -1 && errno != EAGAIN)
       error_information("read");
   }
-  if( c == '\x1b'){
+  if( c == '\x1b') {
     char str_[3];
     if( read( STDIN_FILENO, &str_[0], 1) != 1)
       return '\x1b';
     if( read( STDIN_FILENO, &str_[1], 1) != 1)
       return '\x1b';
     if( str_[0] == '['){
-      if( str_[1] == 'A')
-        return ARROW_UP;
-      else if( str_[1] == 'B')
-        return ARROW_DOWN;
-      else if( str_[1] == 'C')
-        return ARROW_RIGHT;
-      else if( str_[1] == 'D')
-        return ARROW_LEFT;
-      return '\x1b';
+      if( str_[1] >= '0' && str_[1] <= '9'){
+        if( read( STDIN_FILENO, &str_[2], 1) != 1)
+          return '\x1b';
+        if( str_[2] == '~'){
+          //Home 键可以作为 <esc>[1~、<esc>[7~、<esc>[H 或 <esc>OH 发送
+          if( str_[1] == '1')
+            return HOME_KEY;
+          //Delete: <esc>[3~
+          else if( str_[1] == '3')
+            return DEL_KEY;
+          //End 键可以作为 <esc>[4~、<esc>[8~、<esc>[F 或 <esc>OF 发送
+          else if( str_[1] == '4')
+            return END_KEY;
+          //Page Up 以 <esc>[5~ 发送，Page Down 以 <esc>[6~ 发送
+          else if( str_[1] == '5')
+            return PAGE_UP;
+          else if( str_[1] == '6')
+            return PAGE_DOWN;
+          else if( str_[1] == '7')
+            return HOME_KEY;
+          else if( str_[1] == '8')  
+            return END_KEY;
+        }
+      } else {
+        if( str_[1] == 'A')
+          return ARROW_UP;
+        else if( str_[1] == 'B')
+          return ARROW_DOWN;
+        else if( str_[1] == 'C')
+          return ARROW_RIGHT;
+        else if( str_[1] == 'D')
+          return ARROW_LEFT;
+        else if( str_[1] == 'H')
+          return HOME_KEY;
+        else if( str_[1] == 'F')         
+          return END_KEY;
+        return '\x1b';
+      }
+    } else if( str_[0] == '0'){
+      if( str_[1] == 'H')
+        return HOME_KEY;
+      else if( str_[1] == 'F')
+        return END_KEY;
     }
-  }else
+  } else
     return c;
 }
 
 //input system
-void input_system(){
+void input_system() {
   int c = get_read_from_keyboard();
   /* 测试
     if( iscntrl(c)){  //iscntrl(c)检查c是否为c语言中的控制字符
@@ -380,8 +477,18 @@ void input_system(){
   if( c == WITH_CTRL('q') ){ //当按下Ctrl-q/Q 时退出
     clear_screen();   //清除屏幕，atexit()也可以在退出时清除屏幕，但是error_information()的错误信息也会被清除
     exit(0);
-  } else if( c == ARROW_UP || c == ARROW_DOWN || c == ARROW_LEFT || c == ARROW_RIGHT)
+  } else if( c == ARROW_UP || c == ARROW_DOWN || c == ARROW_LEFT || c == ARROW_RIGHT) {
     move_cursor( c);
+  } else if( c == HOME_KEY ) {
+    text.cursor_x = 0;
+  } else if ( c == END_KEY ) {
+    text.cursor_x = text.screen_cols - 1;
+  } else if( c == PAGE_UP || c == PAGE_DOWN ) {
+    int times_ = text.screen_rows;
+    while ( times--){
+      move_cursor( c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -391,15 +498,22 @@ void input_system(){
 void init_text(){
   text.cursor_x = 0;
   text.cursor_y = 0;
+  text.number_rows = 0;
+  text.row = NULL;
+
   if( get_window_size( &text.screen_rows, &text.screen_cols) == -1 )
     error_information("get window size");
 }
 
-int main(){
-  clear_screen();
+int main( int argc, char* argv[]){
+  //命令行参数的使用：
+    //./kilo xxx
+    // argc = 2， argv[0] = "kilo", argv[1] = "xxx"
   enable_raw_mode();
   init_text();
-  
+  if( argc >= 2)
+    text_open( argv[1]);  
+
   while(1){
     output_system();
     input_system();
