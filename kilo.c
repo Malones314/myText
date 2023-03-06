@@ -21,10 +21,11 @@ void error_information( const char* s); //错误信息打印，当函数错误�
 void disable_raw_mode();  //得到terminal的副本，配合atexit()函数在程序结束时还原terminal
 void enable_raw_mode(); //设置终端属性
 int get_window_size( int* rows, int* cols); //得到窗口大小
-char get_read_from_keyboard();  //从键盘读取字符
+int get_read_from_keyboard();  //从键盘读取字符
 void input_system();  //input system
 void init_text(); //初始化myText
 int get_cursor_position( int* rows, int* cols);  //获得光标位置
+void move_cursor( int key); //移动光标位置
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*** defines ***/
@@ -33,6 +34,13 @@ int get_cursor_position( int* rows, int* cols);  //获得光标位置
 #define WITH_CTRL(n) ( (n) & 0x1f )   //取ACSII码后5位
 
 #define KILO_VERSION "0.0.1"
+
+enum Arrow_key{
+  ARROW_LEFT = 1000;
+  ARROW_RIGHT;
+  ARROW_UP;
+  ARROW_DOWN;
+};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -89,6 +97,7 @@ struct Text_config text;
 
 /*** output system ***/
 
+//清除屏幕
 void clear_screen(){
   write(STDOUT_FILENO, "\x1b[2J", 4); //清除屏幕
   write(STDOUT_FILENO, "\x1b[H", 3);  //重定位光标
@@ -101,8 +110,8 @@ void output_draw_rows( struct String_buff* strb ){
 
     if( row_ == text.screen_rows / 3){  //在屏幕三分之一处显示欢迎信息
       char welcome[100];
-      int welcome_len = snprintf( welcome, sizeof( welcome_len),
-        "myText--Kilo -- version %s", KILO_VERSION);
+      int welcome_len = snprintf( welcome, sizeof( welcome),
+        "myText -- Kilo -- version %s", KILO_VERSION);
       if( welcome_len > text.screen_cols)
         welcome_len = text.screen_cols;
       int in_half = (text.screen_cols - welcome_len) / 2;
@@ -126,8 +135,6 @@ void output_draw_rows( struct String_buff* strb ){
       string_buff_append( strb, "\r\n", 2);
   }
 }
-
-//刷新屏幕
 
 //屏幕打印
 void output_system(){
@@ -174,7 +181,7 @@ void output_system(){
   output_draw_rows( &strb);
   
   char buf[32];
-  snprintf( buf, sizeof(buf), "\x1b[%d;%dH", text.cursor_x + 1, text.cursor_y + 1);
+  snprintf( buf, sizeof(buf), "\x1b[%d;%dH", text.cursor_y + 1, text.cursor_x + 1);
   string_buff_append( &strb, buf, strlen(buf));
   
   string_buff_append( &strb, "\x1b[?25h", 6);
@@ -317,19 +324,20 @@ int get_window_size( int* rows, int* cols){
 /*** input system ***/
 
 //方向键移动光标
-void move_cursor( char key){
-  if( key == 37 || key == 8)  //左箭头 Ctrl-H
-    --text.cursor_x;
-  else if( key == 38 || key == 10) //上箭头 Ctrl-J
+void move_cursor( int key){
+  
+  if( key == ARROW_UP) //上箭头 Ctrl-J
     --text.cursor_y;
-  else if( key == 39 || key == 11) //下箭头 Ctrl-K
+  else if( key == ARROW_DOWN) //下箭头 Ctrl-K
     ++text.cursor_y;
-  else if( key == 40 || key == 12) //右箭头 Ctrl-L
+  else if( key == ARROW_RIGHT) //右箭头 Ctrl-L
     ++text.cursor_x;
+  else if( key == ARROW_LEFT)  //左箭头 Ctrl-H
+    --text.cursor_x;
 }
 
 //从键盘读取字符
-char get_read_from_keyboard() {
+int get_read_from_keyboard() {
   int read_errno = 0;
   char c;
 
@@ -338,13 +346,30 @@ char get_read_from_keyboard() {
     if( read_errno == -1 && errno != EAGAIN)
       error_information("read");
   }
-
-  return c;
+  if( c == '\x1b'){
+    char str_[3];
+    if( read( STDIN_FILENO, &str_[0], 1) != 1)
+      return '\x1b';
+    if( read( STDIN_FILENO, &str_[1], 1) != 1)
+      return '\x1b';
+    if( str_[0] == '['){
+      if( str_[1] == 'A')
+        return ARROW_UP;
+      else if( str_[1] == 'B')
+        return ARROW_DOWN;
+      else if( str_[1] == 'C')
+        return ARROW_RIGHT;
+      else if( str_[1] == 'D')
+        return ARROW_LEFT;
+      return '\x1b';
+    }
+  }else
+    return c;
 }
 
 //input system
 void input_system(){
-  char c = get_read_from_keyboard();
+  int c = get_read_from_keyboard();
   /* 测试
     if( iscntrl(c)){  //iscntrl(c)检查c是否为c语言中的控制字符
         printf( "%d\r\n", c);   //c为控制字符，打印c的ASCII码
@@ -355,7 +380,7 @@ void input_system(){
   if( c == WITH_CTRL('q') ){ //当按下Ctrl-q/Q 时退出
     clear_screen();   //清除屏幕，atexit()也可以在退出时清除屏幕，但是error_information()的错误信息也会被清除
     exit(0);
-  } else if( c == 9 || c == 10 || c == 11 || c == 12 c == 37 || c == 38 || c == 39 || c == 40)
+  } else if( c == ARROW_UP || c == ARROW_DOWN || c == ARROW_LEFT || c == ARROW_RIGHT)
     move_cursor( c);
 }
 
