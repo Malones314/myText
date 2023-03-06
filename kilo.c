@@ -17,7 +17,7 @@ struct String_buff;
 struct Text_config;
 void clear_screen();  //清除屏幕
 void output_draw_rows();  //在每一行开头绘制-
-void output_system(); //屏幕打印
+void refresh_screen(); //屏幕打印
 void error_information( const char* s); //错误信息打印，当函数错误时手动调用
 void disable_raw_mode();  //得到terminal的副本，配合atexit()函数在程序结束时还原terminal
 void enable_raw_mode(); //设置终端属性
@@ -29,6 +29,7 @@ int get_cursor_position( int* rows, int* cols);  //获得光标位置
 void move_cursor( int key); //移动光标位置
 void text_open( char* filename); //打开文件
 void text_append_row( char* s, size_t len); //添加一行
+void screen_scroll(); //屏幕滚动
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*** defines ***/
@@ -62,11 +63,13 @@ typedef struct String_row {
 
 //终端信息
 struct Text_config{
-  int cursor_x, cursor_y;
-  int screen_rows;
-  int screen_cols;
-  int number_rows;
-  String_row* row;
+  int cursor_x, cursor_y; //记录光标的行、列
+  int row_off;  //记录用户当前滚动到文件的哪一行
+  int col_off;  //记录用户当前滚动到文件的哪一列
+  int screen_rows;  //记录屏幕的行
+  int screen_cols;  //记录屏幕的列
+  int number_rows;  //记录行数量
+  String_row* row;  //文件一行的string的指针--当作string数组用
   struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
 };
 
@@ -114,17 +117,30 @@ void string_buff_free( struct String_buff* strb){
 /*** output system ***/
 
 //清除屏幕
-void clear_screen(){
+void clear_screen() {
   write(STDOUT_FILENO, "\x1b[2J", 4); //清除屏幕
   write(STDOUT_FILENO, "\x1b[H", 3);  //重定位光标
 }
 
+void screen_scroll(){
+  if ( text.cursor_y < text.row_off)  //如果光标在可见窗口上方,则向上滚动到光标所在的位置
+    text.row_off = text.cursor_y;
+  if( text.cursor_y >= text.row_off + text.screen_rows) //查光标是否越过可见窗口的底部
+    text.row_off = text.cursor_y - text.screen_rows + 1;
+  if( text.cursor_x < text.col_off)
+    text.col_off = text.cursor_x;
+  if( text.cursor_x >= text.col_off + text.screen_cols)
+    text.col_off = text.cursor_x - text.screen_cols + 1;
+  
+}
+
 //在每一行的开头绘制-
-void output_draw_rows( struct String_buff* strb ){
+void output_draw_rows ( struct String_buff* strb ){
   int row_ = -1;
   for( row_ = 0; row_ < text.screen_rows; ++row_){ 
-    if( row_ > text.number_rows) {
-      if( text.number_rows == 0 && row_ == text.screen_rows / 3){  
+    int file_row = row_ + text.row_off;
+    if( file_row > text.number_rows) {
+      if( text.number_rows == 0 && row_ == text.screen_rows / 3) {  
         //当不是从文件系统打开文件时再在屏幕三分之一处显示欢迎信息，若打开文件则不显示
         char welcome[100];
         int welcome_len = snprintf( welcome, sizeof( welcome),
@@ -143,10 +159,12 @@ void output_draw_rows( struct String_buff* strb ){
         string_buff_append( strb, "-", 1);
       }
     } else {
-      int len = text.row[row_].size;
+      int len = text.row[file_row].size - text.col_off;
+      if( len < 0)  //len 现在可以是负数，这意味着用户水平滚动超过了屏幕。将 len 设置为 0，不显示任何内容。
+        len = 0;
       if( len > text.screen_cols )
         len = text.screen_cols;
-      string_buff_append( strb, text.row[row_].one_row_string, len);
+      string_buff_append( strb, text.row[file_row].one_row_string[text.col_off], len);
     }
     string_buff_append( strb, "\x1b[K", 3);
     //k:擦除当前行的一部分, 默认参数为0
@@ -159,7 +177,7 @@ void output_draw_rows( struct String_buff* strb ){
 }
 
 //屏幕打印
-void output_system(){
+void refresh_screen(){
   //第一版 刷新屏幕
 /*
   write( STDOUT_FILENO, "\x1b[2J", 4);
@@ -192,6 +210,8 @@ void output_system(){
 */
 
   //第二版 通过string_buff刷新屏幕
+  screen_scroll();
+
   struct String_buff strb = { NULL, 0};
   string_buff_init( &strb);
 
@@ -203,7 +223,12 @@ void output_system(){
   output_draw_rows( &strb);
   
   char buf[32];
-  snprintf( buf, sizeof(buf), "\x1b[%d;%dH", text.cursor_y + 1, text.cursor_x + 1);
+  //int snprintf(char *str, size_t size, const char *format, ...)
+    //str:目标字符串
+    //size:字符数组大小
+    //format:源字符串
+    //...可变参数
+  snprintf( buf, sizeof(buf), "\x1b[%d;%dH", text.cursor_y - text.row_off + 1, text.cursor_x + 1);
   string_buff_append( &strb, buf, strlen(buf));
   
   string_buff_append( &strb, "\x1b[?25h", 6);
@@ -367,8 +392,7 @@ void text_open( char* filename){
   char* line = NULL;
   size_t linecap = 0;   
   ssize_t linelen ; //ssize_t与size_t相同，但它是有符号类型,将 ssize_t 读作“有符号 size_t”。
-  linelen = getline( &line, &linecap, fp);
-  if( linelen != -1){
+  while( ( linelen = getline( &line, &linecap, fp)) != -1 ){
     while( linelen > 0 && ( line[lenlen - 1] == '\n' ||
                             line[linelen - 1] == '\r' ))
       linelen--;
@@ -388,10 +412,9 @@ void move_cursor( int key){
     if( text.cursor_y != 0)
       --text.cursor_y;
   } else if( key == ARROW_DOWN){ //下箭头 Ctrl-K
-    if( text.cursor_y != text.screen_rows - 1)
+    if( text.cursor_y < text.number_rows)
       ++text.cursor_y;
   } else if( key == ARROW_RIGHT){ //右箭头 Ctrl-L
-    if( text.cursor_x != text.screen_cols - 1)
       ++text.cursor_x;
   } else if( key == ARROW_LEFT){  //左箭头 Ctrl-H
     if( text.cursor_x != 0)
@@ -498,6 +521,7 @@ void input_system() {
 void init_text(){
   text.cursor_x = 0;
   text.cursor_y = 0;
+  text.row_off = 0;
   text.number_rows = 0;
   text.row = NULL;
 
@@ -515,7 +539,7 @@ int main( int argc, char* argv[]){
     text_open( argv[1]);  
 
   while(1){
-    output_system();
+    refresh_screen();
     input_system();
   }
   return 0;
