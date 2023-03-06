@@ -77,6 +77,7 @@ void string_buff_free( struct String_buff* strb){
 /*** data ***/
 
 struct Text_config{
+  int cursor_x, cursor_y;
   int screen_rows;
   int screen_cols;
   struct termios orig_termios;  //保存程序开始时的终端属性，用于程序结束后还原终端属性
@@ -172,7 +173,10 @@ void output_system(){
   
   output_draw_rows( &strb);
   
-  string_buff_append( &strb, "\x1b[H", 3);
+  char buf[32];
+  snprintf( buf, sizeof(buf), "\x1b[%d;%dH", text.cursor_x + 1, text.cursor_y + 1);
+  string_buff_append( &strb, buf, strlen(buf));
+  
   string_buff_append( &strb, "\x1b[?25h", 6);
   //h:Set Mode,用于打开各种终端功能或模式
 
@@ -312,6 +316,18 @@ int get_window_size( int* rows, int* cols){
 
 /*** input system ***/
 
+//方向键移动光标
+void move_cursor( char key){
+  if( key == 37 || key == 8)  //左箭头 Ctrl-H
+    --text.cursor_x;
+  else if( key == 38 || key == 10) //上箭头 Ctrl-J
+    --text.cursor_y;
+  else if( key == 39 || key == 11) //下箭头 Ctrl-K
+    ++text.cursor_y;
+  else if( key == 40 || key == 12) //右箭头 Ctrl-L
+    ++text.cursor_x;
+}
+
 //从键盘读取字符
 char get_read_from_keyboard() {
   int read_errno = 0;
@@ -339,7 +355,8 @@ void input_system(){
   if( c == WITH_CTRL('q') ){ //当按下Ctrl-q/Q 时退出
     clear_screen();   //清除屏幕，atexit()也可以在退出时清除屏幕，但是error_information()的错误信息也会被清除
     exit(0);
-  }
+  } else if( c == 9 || c == 10 || c == 11 || c == 12 c == 37 || c == 38 || c == 39 || c == 40)
+    move_cursor( c);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -347,6 +364,8 @@ void input_system(){
 /*** init system ***/
 
 void init_text(){
+  text.cursor_x = 0;
+  text.cursor_y = 0;
   if( get_window_size( &text.screen_rows, &text.screen_cols) == -1 )
     error_information("get window size");
 }
