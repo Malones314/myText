@@ -30,6 +30,7 @@ void move_cursor( int key); //移动光标位置
 void text_open( char* filename); //打开文件
 void text_append_row( char* s, size_t len); //添加一行
 void screen_scroll(); //屏幕滚动
+void text_update_row( String_row* row); // 使用原本字符串字符串填充render字符串
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*** defines ***/
@@ -57,8 +58,10 @@ enum Arrow_key{
 
 //存储一行文字
 typedef struct String_row {
-  int size;
-  char* one_row_string;
+  int size; //本行文字长度
+  char* one_row_string; //本行存储的文字
+  int rsize;  //用于不可打印的控制字符等
+  char* render; //不可打印的控制字符等的长度
 } String_row;
 
 //终端信息
@@ -373,13 +376,32 @@ int get_window_size( int* rows, int* cols){
 
 /*** row operations ***/
 
+void text_update_row( String_row* row) {
+  free( row->render);
+  row->render = ( char*) malloc( row->size + 1);
+
+  int j = -1;
+  int idx = 0;
+  for( j = 0; j < row->size; j++){
+    row->render[idx++] = row->one_row_string[j];
+  }
+  row->render[idx] = '\0';
+  row->rsize = idx;
+}
+
 void text_append_row( char* s, size_t len){
   text.row = realloc( text.row, sizeof( String_row)*(text.number_rows + 1) ); //通过realloc分配内存
+  
   int rows_ = text.number_rows; //得到当前行号
   text.row[rows_].size = len; 
   text.row[rows_].one_row_string = ( char*)malloc( len + 1);
   memcpy( text.row[rows_].one_row_string, s, len);
   text.row[rows_].one_row_string[len] = '\0';
+
+  text.row[rows_].rsize = 0;
+  text.row[rows_].render = NULL;
+  text_update_row( &text.row[rows_]);
+  
   ++text.number_rows;
 }
 
