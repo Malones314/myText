@@ -177,7 +177,7 @@ void output_draw_rows ( struct String_buff* strb ){
 }
 
 //屏幕打印
-void refresh_screen(){
+void refresh_screen() {
   //第一版 刷新屏幕
 /*
   write( STDOUT_FILENO, "\x1b[2J", 4);
@@ -228,7 +228,8 @@ void refresh_screen(){
     //size:字符数组大小
     //format:源字符串
     //...可变参数
-  snprintf( buf, sizeof(buf), "\x1b[%d;%dH", text.cursor_y - text.row_off + 1, text.cursor_x + 1);
+  snprintf( buf, sizeof(buf), "\x1b[%d;%dH", text.cursor_y - text.row_off + 1, text.cursor_x - text.col_off + 1);
+  
   string_buff_append( &strb, buf, strlen(buf));
   
   string_buff_append( &strb, "\x1b[?25h", 6);
@@ -301,7 +302,8 @@ void enable_raw_mode() {
   
   //c_cc 字段的索引，它代表“控制字符”，一个控制各种终端设置的字节数组。
   raw.c_cc[VMIN] = 0;   //VMIN 值设置 read() 返回之前所需的最小输入字节数。
-  raw.c_cc[VTIME] = 1;  //VTIME 值设置在 read() 返回之前等待的最长时间。单位是0.1s, 当read超时，返回0，逻辑符合
+  raw.c_cc[VTIME] = 1;  //VTIME 值设置在 read() 返回之前等待的最长时间。
+    //单位是0.1s, 当read超时，返回0，逻辑符合
 
   if( tcsetattr( STDIN_FILENO, TCSAFLUSH, &raw) == -1 )
     error_information( "tcsetattr");
@@ -343,7 +345,8 @@ int get_window_size( int* rows, int* cols){
 
   //int ioctl(int fildes, int request, ...);
     //对设备专用文件执行各种设备特定的控制功能。
-    //...：可选的第三个参数 (arg)，用于请求特定信息。数据类型取决于特定的控制请求，但它可以是 int 或指向特定于设备的数据结构的指针。
+    //...：可选的第三个参数 (arg)，用于请求特定信息。数据类型取决于特定的控制请求，
+    //但它可以是 int 或指向特定于设备的数据结构的指针。
     //返回类型：
       //EBADF：fildes 参数不是有效的打开文件描述符。
       //EFAULT：请求参数需要向 arg 指向的缓冲区或从缓冲区传输数据，但此指针无效。
@@ -407,6 +410,8 @@ void text_open( char* filename){
 
 //方向键移动光标
 void move_cursor( int key){
+  String_row* row = ( text.cursor_y >= text.number_rows) ? NULL : text.row[text.cursor_y];  
+    //检查光标是否在实际行上
   
   if( key == ARROW_UP){ //上箭头 Ctrl-J
     if( text.cursor_y != 0)
@@ -415,11 +420,24 @@ void move_cursor( int key){
     if( text.cursor_y < text.number_rows)
       ++text.cursor_y;
   } else if( key == ARROW_RIGHT){ //右箭头 Ctrl-L
+    if( row && text.cursor_x < row->size){
       ++text.cursor_x;
+    } else if( row && text.cursor_x == row->size){
+      ++text.cursor_y;
+      text.cursor_x = 0;
+    }
   } else if( key == ARROW_LEFT){  //左箭头 Ctrl-H
-    if( text.cursor_x != 0)
+    if( text.cursor_x != 0){
     --text.cursor_x;
+    } else if( row && text.cursor_x > 0){  //左箭头到最前端且非首行时前往上一行末尾
+      --text.cursor_y;
+      text.cursor_x = text.row[text.cursor_y].size;
+    }
   }
+  row = ( text.cursor_y >= text.number_rows) ? NULL : &text.row[text.cursor_y];
+  int row_len = row ? row->size : 0;
+  if( text.cursor_x > row_len)
+    text.cursor_x = row_len;
 }
 
 //从键盘读取字符
