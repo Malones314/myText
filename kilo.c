@@ -16,7 +16,7 @@
 struct String_buff;
 struct Text_config;
 void clear_screen();  //清除屏幕
-void output_draw_rows();  //在每一行开头绘制-
+void output_draw_rows( struct String_buff* strb );  //在每一行开头绘制-
 void refresh_screen(); //屏幕打印
 void error_information( const char* s); //错误信息打印，当函数错误时手动调用
 void disable_raw_mode();  //得到terminal的副本，配合atexit()函数在程序结束时还原terminal
@@ -39,6 +39,8 @@ void text_update_row( String_row* row); // 使用原本字符串字符串填充r
 #define WITH_CTRL(n) ( (n) & 0x1f )   //取ACSII码后5位
 
 #define KILO_VERSION "0.0.1"
+
+#define TAB_STOP 8
 
 enum Arrow_key{
   ARROW_LEFT = 1000,
@@ -162,12 +164,12 @@ void output_draw_rows ( struct String_buff* strb ){
         string_buff_append( strb, "-", 1);
       }
     } else {
-      int len = text.row[file_row].size - text.col_off;
+      int len = text.row[file_row].rsize - text.col_off;
       if( len < 0)  //len 现在可以是负数，这意味着用户水平滚动超过了屏幕。将 len 设置为 0，不显示任何内容。
         len = 0;
       if( len > text.screen_cols )
         len = text.screen_cols;
-      string_buff_append( strb, text.row[file_row].one_row_string[text.col_off], len);
+      string_buff_append( strb, text.row[file_row].render[text.col_off], len);
     }
     string_buff_append( strb, "\x1b[K", 3);
     //k:擦除当前行的一部分, 默认参数为0
@@ -377,13 +379,25 @@ int get_window_size( int* rows, int* cols){
 /*** row operations ***/
 
 void text_update_row( String_row* row) {
-  free( row->render);
-  row->render = ( char*) malloc( row->size + 1);
-
+  int tabs = 0;
   int j = -1;
+  for( j = 0; j < row->size; j++)
+    if( row->one_row_string[j] == '\t')
+      ++tabs;
+
+  free( row->render);
+  row->render = ( char*) malloc( row->size + tabs*( TAB_STOP - 1) + 1); 
+    //tabs最大为8字节，row->size已经为每个tab计数了1，所以*7即可
+
   int idx = 0;
   for( j = 0; j < row->size; j++){
-    row->render[idx++] = row->one_row_string[j];
+    if( row->one_row_string[j] == '\t'){
+      row->render[idx++] = ' ';
+      while( idx % TAB_STOP != 0)
+        row->render[idx++] = ' ';
+    }else{
+      row->render[idx++] = row->one_row_string[j];
+    }
   }
   row->render[idx] = '\0';
   row->rsize = idx;
